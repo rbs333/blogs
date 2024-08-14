@@ -1,12 +1,12 @@
 # Evaluating RAG
 
-When working with RAG applications, it can often be difficult to understand the quality of the application you have just built or where and how to improve results if they're not up to par. Likely, you have used it a fair bit and have observed that it provides reasonable results to the questions you have provided, but you don't have time to read through every piece of context returned for every answer, and you may not yet know how users will interact with the chat application. This can make going to production with confidence difficult because you don't know how your system is performing beyond the anecdotal evidence from your dev and QA teams. Moreover, it can be really difficult to sift through the signal and noise on LinkedIn and Twitter, where it seems a new revolutionary technique is introduced every 30 minutes. Establishing a baseline of tangible metrics to be improved over time provides essential insight into which techniques suit your application and gives you confidence going to production.
+When working with RAG applications, it's often difficult to understand the quality of what you have just built and how to improve results if they're not up to par. Likely, you and your team have played around with the system enough to observe that it provides reasonable results at first glance, but you don't have time to read through every piece of context returned for every answer, and you may not yet know how users will interact with it as a chat app. This can make going to production with confidence difficult because you don't know how your system is performing beyond the anecdotal evidence from your dev and QA teams. Taking a metrics driven approach can be really beneficial in this case allowing you to establish a baseline level of quality that can be improved overtime. Not only will this help you go to prod with confidence but it can help you determine which techniques are best suited for your particular business needs. On LinkedIn and Twitter, it can seem like a new *revolutionary* technique is introduced every 30 minutes to improve your RAG app which can lead to FOMO unless you have a means of quickly and effectively testing approaches to cut through the marketing noise.
 
-In this blog, we will cover how to measure and establish such a baseline to begin to better understand app performance. Specifically, we will walk through how to implement the popular and pragmatic RAGAs framework for a basic RAG app. In addition we will get into the specifics of how the metrics are calculated and what they do and do not tell us.
+In this blog, we will cover how to measure and establish such a baseline to begin to better understand the quality of your system. Specifically, we will walk through how to implement the popular and pragmatic RAGAs framework for a basic RAG app. We will also dive into the specifics of how the metrics are calculated and what they do and do not tell us.
 
 # The code
 
-Let's say you've built a simple RAG app using LangChain, Redis, and OpenAI to answer questions about financial documents. In this example, we will use Nike's 2023 10-K document, but feel free to tailor it to your use case.
+The following code outlines a simple RAG app using LangChain, Redis, and OpenAI to answer questions about financial documents. In this example, we will use Nike's 2023 10-K document as our contextual data, but feel free to tailor it to your own use case.
 
 ## Split and load the doc:
 ```python
@@ -26,7 +26,7 @@ text_splitter = RecursiveCharacterTextSplitter(
 chunks = loader.load_and_split(text_splitter)
 ```
 
-## Create vector embeddings for the chunks and populate and store in Redis as the vector store
+## Create vector embeddings for the chunks and store in Redis as the vector store
 ```python
 from langchain.embeddings.huggingface import HuggingFaceEmbeddings
 from langchain.vectorstores.redis import Redis as LangChainRedis
@@ -107,11 +107,11 @@ Output
 
 ## Viola we have a RAG app - Let's start evaluating.
 
-The RAGAs framework consists of four primary metrics: **faithfulness**, **answer relevancy**, **context precision**, and **context recall**. Context precision and recall quantify the performance of retrieval from the vector store, while faithfulness and answer relevance quantify how well the system performed in generating results based on the context. These metrics work in tandem to provide a full picture of how the app is performing.
+The RAGAs framework consists of four primary metrics: **faithfulness**, **answer relevancy**, **context precision**, and **context recall**. Context precision and recall quantify the performance of retrieval from the vector store, while faithfulness and answer relevance quantify how well the system performed generating results based on the retrieved context. These metrics work in tandem to provide a full picture of how the app is performing.
 
 In order to calculate these metrics, we need to collect four pieces of information from our RAG interactions: the question that was asked, the answer that was generated, the context that was provided to the LLM to generate the answer, and, depending on which metrics you are interested in, a ground truth answer determined either by a critic LLM or a human-in-the-loop process.
 
-Let's test this out for the question: `Where is Nike headquartered and when was it founded?` with ground truth `Nike is headquartered Beaverton, Oregon and was founded in 1964.`
+As an example, let's test this out for the question: `Where is Nike headquartered and when was it founded?` with ground truth `Nike is headquartered Beaverton, Oregon and was founded in 1964.`
 
 ## Execute test in code
 
@@ -180,41 +180,41 @@ eval_df[["faithfulness", "answer_relevancy", "context_precision", "context_recal
 
 ## What do these values mean?
 
-Let's start with the metrics that look good. Answer relevancy is calculated under the hood by asking an LLM to generate hypothetical questions for the given answer and taking the average cosine similarity between those questions. A high score here illustrates to us that there weren't too many other ways to arrive at this answer as a proxy for how directly *relevant* the answer was to the specific question asked. Intuitively, this makes sense since it's fairly obvious what the likely question was for the answer "Nike is headquartered in Beaverton, Oregon and was founded in 1967."
+Let's start with the metrics that look promising. Answer relevancy is calculated under the hood by prompting an LLM to generate hypothetical questions based on the answer returned and then taking the average cosine similarity between those generated questions. A high score here illustrates that there isn't a high degree of variance as to how the answer could be determined. It makes sense intuitively for our example that this score is high since it's fairly obvious what sort of questions lead to the answer "Nike is headquartered in Beaverton, Oregon and was founded in 1967." However, a low score gives us an indication of a vague answer that directly related to what was asked.
 
-We also observed that the context precision for our question/answer pair was 1.0. Context precision quantifies how *good* the returned context was and is defined as:
+Next, the context precision for our question/answer pair was 1.0. Context precision quantifies how *good* the returned context was and is defined as:
 
 $$
 Context\ precision = \frac{True\ Positives}{True\ Positives\ + False\ Positives}
 $$
 
-A true positive is defined as a document that is relevant and was returned in the result set and a false positive is a document that was not relevant and returned in the result set. In this case, the evaluation determined that all the docs returned were relevant to the ground truth provided. This is a positive indication but does require a bit of faith in the LLM's ability to determine what is relevant, which is a topic unto itself. I recommend reading the [full paper](https://arxiv.org/pdf/2309.15217) for those interested in gaining more insight on this front.
+A true positive is a document that **is relevant** and **was returned** in the result set and a false positive is a document that was **not relevant** and **was returned** in the result set. In this case, the evaluation determined that all the docs returned were relevant to the ground truth provided. This is a positive but does require a bit of faith in the LLM's ability to determine what is relevant, which is a topic unto itself. I recommend reading the [full paper](https://arxiv.org/pdf/2309.15217) for those interested in gaining more insight on this front.
 
-Faithfulness is defined:
+Moving to the metrics that were less promising, faithfulness is defined:
 
 $$
-Faithfullness\ = \frac{Number\ of\ claims\ in\ the\ generated\ answer\ that\ can\ be\ inferred\ from\ the\ given\ context}{Total\ number\ of\ claim\ in\ the\ generated\ answer}
+Faithfulness\ = \frac{Number\ of\ claims\ in\ the\ generated\ answer\ that\ can\ be\ inferred\ from\ the\ given\ context}{Total\ number\ of\ claim\ in\ the\ generated\ answer}
 $$
-In this case, there are two claims that can be determined from the answer: "Nike is headquartered in Beaverton, Oregon and was founded in 1967."
+For our example, there are two claims that can be determined from the answer: "Nike is headquartered in Beaverton, Oregon and was founded in 1967."
 
 1. Nike is headquartered in Beaverton, Oregon.
 2. Nike was founded in 1967.
 
-From the context provided, there is no mention of Nike being located in Beaverton, Oregon; therefore, the claim cannot be inferred from the given context. The claim that Nike was founded in 1967, however, can be inferred from the context since the doc specifically mentions Nike being incorporated in 1967. This result highlights an important point about faithfulness as a metric. **Faithfulness does not measure accuracy**. What's interesting about this example is the claim that could **not** have been inferred from context (Nike is located in Beaverton) is factually correct. However, the claim that Nike was founded in 1967 is incorrect but can be inferred from the context. **Faithfulness measures how true to the text an answer was. It does not tell us if the answer was correct**.
+From the context provided, there is no mention of Nike being located in Beaverton, Oregon; therefore, the claim cannot be inferred from the given context. The claim that Nike was founded in 1967, however, can be inferred from the context since the doc specifically mentions Nike being incorporated in 1967. This result highlights an important point about faithfulness as a metric. **Faithfulness does not measure accuracy**. What's interesting about this example is the claim that could **not** have been inferred from context (Nike is located in Beaverton) is factually correct. However, the claim that Nike was founded in 1967 is factually incorrect but **can** be inferred from the context. **Faithfulness measures how true to the text an answer was. It does not tell us if the answer was correct or not**.
 
-Accuracy can be understood from context recall and is defined as:
+Accuracy can be understood from context recall however which is defined as:
 
 $$
 Context\ recall = \frac{Ground\ Truth\ sentences\ that\ can\ be\ attributed\ to\ context}{Total\ number\ of\ sentences\ in\ the\ ground\ truth}
 $$
 
-The ground truth we provided for this example was `Nike is headquartered in Beaverton, Oregon and was founded in 1964` which could be broken down into two sentences (or claims):
+The ground truth we provided for this example was `Nike is headquartered in Beaverton, Oregon and was founded in 1964` which can be broken down into two sentences/claims:
 1. Nike is headquartered in Beaverton.
 2. Nike was founded in 1964.
 
-Neither of these claim can be inferred *correctly* from the context; therefore, context recall = 0/2 or 0.
+Neither of these claims can be inferred *correctly* from the context; therefore, context recall is 0/2 or 0.
 
-The first example question provided here is intentionally general and meant to bring up an important point about RAG: RAG is an architecture designed to answer **specific** questions about a context. It is not necessarily ideal for answering **general** questions—that is what an LLM is for. The question `Where is Nike located and when was it founded?` is a general knowledge question that isn't specific to the 10-K document we loaded into our context. When designing a test and educating users about how to best interact with a RAG app, it's important to emphasize what type of questions are meant to be answered by the chat app. This is also why an agent layer can be so essential to a good chat experience because general questions should be handled by a general language model, while specific contextual questions should be handled by RAG, and a layer to determine the difference can greatly improve performance.
+The first example question provided here is intentionally general and meant to bring up an important point about RAG: RAG is an architecture designed to answer **specific** questions about a context. It is not necessarily ideal for answering **general** questions—that is what an LLM is for. The question `Where is Nike located and when was it founded?` is a general knowledge question that isn't specific to the 10-K document we loaded into our context. When designing a test and educating users about how to best interact with a RAG app, it's important to emphasize what type of questions are meant to be answered by the app. This is also why an agent layer can be so essential to a good chat experience because general questions should be handled by a general language model, while specific contextual questions should be handled by RAG, and a layer to determine the difference can greatly improve performance.
 
 
 ## Let's ask a different question
@@ -274,21 +274,23 @@ For this test, we can see that our RAGAs scores were very good. This is largely 
 - It uses specific terms that make matching in the vector space more likely.
 - The ground truth is similar to the doc content.
 
-With RAG, the question format really matters in the same way that formatting and using the right terms in a Google search really matters. Because we are using math to process natural language, we have to be mindful of interacting with the system in a way that lends itself to that paradigm. Coincidentally, this is why query rewriting in your applications can be really powerful, because you are performing conversions that, while obvious to humans, would not be obvious to a machine and can greatly improve performance.
+With RAG, the question format really matters in the same way that formatting and using the right terms in a Google search really matters. Because we are using math to process natural language, we have to be mindful of interacting with the system in a way that lends itself to that paradigm. Coincidentally, this is why query rewriting in your applications can be really powerful, because you are performing conversions that, while obvious to humans, would not be obvious to a machine and can also greatly improve performance but now you have the tools to test that for yourself!
 
 # Creating a test dataset
 
-Now that we have an understanding of the metrics in play and a better idea of what they tell us about our app, the next question becomes: how do we go about creating a dataset to test our specific apps? This is one of the more powerful pieces of the [RAGAs library](https://docs.ragas.io/en/latest/getstarted/testset_generation.html). RAGAs is designed to be 'reference-free' and provides a helper class for auto-generating a test set. The second example question was generated this way. It is worth noting that generating a synthetic dataset is not a replacement for collecting appropriate user data or labeling your own set of test questions with ground truth; however, it is a very effective baseline for getting an initial sense of app performance when a polished test set is not yet available or feasible. In the initial paper proposing RAGAs, a pairwise comparison between human annotators and the RAGAs approach found that the two were in agreement 95%, 78%, and 70% of the time, respectively, for faithfulness, answer relevance, and contextual relevance ([pg 5](https://arxiv.org/pdf/2309.15217)). Note: this was research done on the WikiEval dataset, which is probably one of the easier datasets for LLMs; however, it should add some confidence in RAGAs as a very good first pass.
+Now that we have an understanding of the metrics in play and a better idea of what they tell us about our app, the next question becomes: how do we go about creating a dataset to test our specific app? This is one of the more powerful pieces the [RAGAs library](https://docs.ragas.io/en/latest/getstarted/testset_generation.html) library provides tooling around. RAGAs is designed to be 'reference-free' and provides a helper class for auto-generating a test set. In fact, the second example question was generated this way. It is worth noting that generating a synthetic dataset is not a replacement for collecting appropriate user data or labeling your own set of test questions with ground truth; however, it can be a very effective baseline for getting an initial sense of app performance when a polished test set is not yet available or feasible. In the initial paper proposing RAGAs, a pairwise comparison between human annotators and the RAGAs approach found that the two were in agreement 95%, 78%, and 70% of the time, respectively, for faithfulness, answer relevance, and contextual relevance ([pg 5](https://arxiv.org/pdf/2309.15217)). Note: this was research done on the WikiEval dataset, which is probably one of the easier datasets for LLMs; however, it should add some confidence in RAGAs as a very good first pass.
+
+It is also worth noting that there is no particular magic to creating a test set. All you need is a set of questions labeled with ground truth answers either by you or your favorite model. An hour of thought and labeling effort can be a very valuable exercise and could even be used as an example to an LLM for the type of questions you expect and want your app to be tested with.
 
 
-The code to create an initial dataset would look like:
+Code to generate a test set with the ragas library:
 ```python
 from ragas.testset.generator import TestsetGenerator
 from ragas.testset.evolutions import simple, reasoning, multi_context
 from llama_index.core import SimpleDirectoryReader
 
 generator_llm = # your choice of llm
-critic_llm = # your choice of llm usually a bigger model for critic
+critic_llm = # your choice of llm => usually a bigger model for critic
 embeddings = # your choice of embedding model
 
 generator = TestsetGenerator.from_llama_index(
@@ -297,6 +299,7 @@ generator = TestsetGenerator.from_llama_index(
     embeddings=embeddings,
 )
 
+# the source doc will be whatever unstructured data (pdf, html, images, etc) you are embedding and fetching as context
 reader = SimpleDirectoryReader(input_files=[SOURCE_DOC])
 
 documents = reader.load_data()
@@ -308,9 +311,9 @@ testset = generator.generate_with_llamaindex_docs(
 )
 ```
 
-# Review
+# Wrapping up
 
-In this blog we have covered:
+In this blog we covered:
 
 - The importance of establishing a metrics based baseline
 - How to get started with RAGAs
